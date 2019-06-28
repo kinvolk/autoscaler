@@ -10,7 +10,7 @@ the cluster autoscaler up and running.
 ## Permissions and credentials
 
 The autoscaler needs a `ServiceAccount` with permissions for Kubernetes and
-requires credentials for interacting with OpenStack.
+requires credentials for interacting with Packet.
 
 An example `ServiceAccount` is given in [examples/cluster-autoscaler-svcaccount.yaml](examples/cluster-autoscaler-svcaccount.yaml).
 
@@ -28,6 +28,8 @@ In the above file you can modify the following fields:
 | cluster-autoscaler-cloud-config | Global/billing     | The billing interval for new nodes (default: hourly)                                                                               |
 | cluster-autoscaler-cloud-config | Global/os          | The OS image to use for new nodes (default: ubuntu_18_04). If you change this also update cloudinit.                               |
 | cluster-autoscaler-cloud-config | Global/cloudinit   | The base64 encoded init script that installs Docker and kubeadm on newly provisioned nodes. Default value tested with Ubuntu 18.04 |
+| cluster-autoscaler-cloud-config | Global/reservation | The values "require" or "prefer" will request the next available hardware reservation for new devices in selected facility & plan. |
+|                                 |                    | If no hardware reservations match, "require" will trigger a failure, while "prefer" will launch on-demand devices (default: none)  |
 
 ## Configure nodepool and cluster names using Packet tags
 

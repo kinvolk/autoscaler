@@ -46,6 +46,7 @@ type packetManagerRest struct {
 	os                string
 	billing           string
 	cloudinit         string
+	reservation       string
 	waitTimeStep      time.Duration
 }
 
@@ -59,6 +60,7 @@ type ConfigGlobal struct {
 	OS                string `gcfg:"os"`
 	Billing           string `gcfg:"billing"`
 	CloudInit         string `gcfg:"cloudinit"`
+	Reservation       string `gcfg:"reservation"`
 }
 
 // ConfigFile is used to read and store information from the cloud configuration file
@@ -89,17 +91,18 @@ type IPAddressCreateRequest struct {
 
 // DeviceCreateRequest represents a request to create a new Packet device. Used by createNodes
 type DeviceCreateRequest struct {
-	Hostname     string                   `json:"hostname"`
-	Plan         string                   `json:"plan"`
-	Facility     []string                 `json:"facility"`
-	OS           string                   `json:"operating_system"`
-	BillingCycle string                   `json:"billing_cycle"`
-	ProjectID    string                   `json:"project_id"`
-	UserData     string                   `json:"userdata"`
-	Storage      string                   `json:"storage,omitempty"`
-	Tags         []string                 `json:"tags"`
-	CustomData   string                   `json:"customdata,omitempty"`
-	IPAddresses  []IPAddressCreateRequest `json:"ip_addresses,omitempty"`
+	Hostname              string                   `json:"hostname"`
+	Plan                  string                   `json:"plan"`
+	Facility              []string                 `json:"facility"`
+	OS                    string                   `json:"operating_system"`
+	BillingCycle          string                   `json:"billing_cycle"`
+	ProjectID             string                   `json:"project_id"`
+	UserData              string                   `json:"userdata"`
+	Storage               string                   `json:"storage,omitempty"`
+	Tags                  []string                 `json:"tags"`
+	CustomData            string                   `json:"customdata,omitempty"`
+	IPAddresses           []IPAddressCreateRequest `json:"ip_addresses,omitempty"`
+	HardwareReservationID string                   `json:"hardware_reservation_id,omitempty"`
 }
 
 // CloudInitTemplateData represents the variables that can be used in cloudinit templates
@@ -156,6 +159,7 @@ func createPacketManagerRest(configReader io.Reader, discoverOpts cloudprovider.
 		os:                cfg.Global.OS,
 		billing:           cfg.Global.Billing,
 		cloudinit:         cfg.Global.CloudInit,
+		reservation:       cfg.Global.Reservation,
 	}
 	return &manager, nil
 }
@@ -210,9 +214,6 @@ func randString8() string {
 // createNodes provisions new nodes on packet and bootstraps them in the cluster.
 func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	klog.Infof("Updating node count to %d for nodegroup %s", nodes, nodegroup)
-	packetAuthToken := os.Getenv("PACKET_AUTH_TOKEN")
-	url := "https://api.packet.net/projects/" + mgr.projectID + "/devices"
-
 	cloudinit, err := base64.StdEncoding.DecodeString(mgr.cloudinit)
 	if err != nil {
 		log.Fatal(err)
@@ -227,6 +228,11 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	ud := renderTemplate(string(cloudinit), udvars)
 	hn := "k8s-" + mgr.clusterName + "-" + nodegroup + "-" + randString8()
 
+	reservation := ""
+	if mgr.reservation == "require" || mgr.reservation == "prefer" {
+		reservation = "next-available"
+	}
+
 	cr := DeviceCreateRequest{
 		Hostname:     hn,
 		Facility:     []string{mgr.facility},
@@ -236,26 +242,57 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 		BillingCycle: mgr.billing,
 		UserData:     renderTemplate(ud, udvars),
 		Tags:         []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
+		HardwareReservationID: reservation,
 	}
 
-	jsonValue, _ := json.Marshal(cr)
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
-	req.Header.Set("X-Auth-Token", packetAuthToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		panic(err)
-		// klog.Fatalf("Error creating node: %v", err)
+	resp, err := createDevice(&cr)
+	if err != nil || resp.StatusCode > 299 {
+		// If reservation is preferred but not available, retry provisioning as on-demand
+		if reservation != "" && mgr.reservation == "prefer" {
+			klog.Infof("Reservation preferred but not available. Provisioning on-demand node.")
+			cr.HardwareReservationID = ""
+			resp, err = createDevice(&cr)
+			if err != nil {
+				klog.Errorf("Failed to create device using Packet API: %v", err)
+				panic(err)
+			} else if resp.StatusCode > 299 {
+				klog.Errorf("Failed to create device using Packet API: %v", resp)
+				panic(resp)
+			}
+		} else if err != nil {
+			klog.Errorf("Failed to create device using Packet API: %v", err)
+			panic(err)
+		} else if resp.StatusCode > 299 {
+			klog.Errorf("Failed to create device using Packet API: %v", resp)
+			panic(resp)
+		}
 	}
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
-	klog.Infof("Created device %v", body)
+	ioutil.ReadAll(resp.Body)
+	klog.Infof("Created new node on Packet.")
+	if cr.HardwareReservationID != "" {
+		klog.Infof("Reservation %v", cr.HardwareReservationID)
+	}
 
 	return nil
+}
+
+func createDevice(cr *DeviceCreateRequest) (*http.Response, error) {
+	packetAuthToken := os.Getenv("PACKET_AUTH_TOKEN")
+	url := "https://api.packet.net/projects/" + cr.ProjectID + "/devices"
+	jsonValue, _ := json.Marshal(cr)
+	klog.Infof("Creating new node")
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
+	if err != nil {
+		klog.Errorf("Failed to create device: %v", err)
+		panic(err)
+	}
+	req.Header.Set("X-Auth-Token", packetAuthToken)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	return resp, err
 }
 
 // getNodes should return ProviderIDs for all nodes in the node group,
