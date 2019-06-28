@@ -234,14 +234,14 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	}
 
 	cr := DeviceCreateRequest{
-		Hostname:     hn,
-		Facility:     []string{mgr.facility},
-		Plan:         mgr.plan,
-		OS:           mgr.os,
-		ProjectID:    mgr.projectID,
-		BillingCycle: mgr.billing,
-		UserData:     renderTemplate(ud, udvars),
-		Tags:         []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
+		Hostname:              hn,
+		Facility:              []string{mgr.facility},
+		Plan:                  mgr.plan,
+		OS:                    mgr.os,
+		ProjectID:             mgr.projectID,
+		BillingCycle:          mgr.billing,
+		UserData:              renderTemplate(ud, udvars),
+		Tags:                  []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
 		HardwareReservationID: reservation,
 	}
 
