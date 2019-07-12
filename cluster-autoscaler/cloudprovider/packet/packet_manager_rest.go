@@ -47,6 +47,7 @@ type packetManagerRest struct {
 	billing           string
 	cloudinit         string
 	reservation       string
+	hostnamePattern   string
 	waitTimeStep      time.Duration
 }
 
@@ -61,6 +62,7 @@ type ConfigGlobal struct {
 	Billing           string `gcfg:"billing"`
 	CloudInit         string `gcfg:"cloudinit"`
 	Reservation       string `gcfg:"reservation"`
+	HostnamePattern   string `gcfg:"hostname-pattern"`
 }
 
 // ConfigFile is used to read and store information from the cloud configuration file
@@ -112,6 +114,12 @@ type CloudInitTemplateData struct {
 	APIServerEndpoint    string
 }
 
+type HostnameTemplateData struct {
+	ClusterName string
+	NodeGroup   string
+	RandString8 string
+}
+
 // Find returns the smallest index i at which x == a[i],
 // or len(a) if there is no such index.
 func Find(a []string, x string) int {
@@ -160,6 +168,7 @@ func createPacketManagerRest(configReader io.Reader, discoverOpts cloudprovider.
 		billing:           cfg.Global.Billing,
 		cloudinit:         cfg.Global.CloudInit,
 		reservation:       cfg.Global.Reservation,
+		hostnamePattern:   cfg.Global.HostnamePattern,
 	}
 	return &manager, nil
 }
@@ -226,7 +235,12 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 		APIServerEndpoint:    mgr.apiServerEndpoint,
 	}
 	ud := renderTemplate(string(cloudinit), udvars)
-	hn := "k8s-" + mgr.clusterName + "-" + nodegroup + "-" + randString8()
+	hnvars := HostnameTemplateData{
+		ClusterName: mgr.clusterName,
+		NodeGroup:   nodegroup,
+		RandString8: randString8(),
+	}
+	hn := renderTemplate(mgr.hostnamePattern, hnvars)
 
 	reservation := ""
 	if mgr.reservation == "require" || mgr.reservation == "prefer" {
@@ -234,14 +248,14 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	}
 
 	cr := DeviceCreateRequest{
-		Hostname:              hn,
-		Facility:              []string{mgr.facility},
-		Plan:                  mgr.plan,
-		OS:                    mgr.os,
-		ProjectID:             mgr.projectID,
-		BillingCycle:          mgr.billing,
-		UserData:              renderTemplate(ud, udvars),
-		Tags:                  []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
+		Hostname:     hn,
+		Facility:     []string{mgr.facility},
+		Plan:         mgr.plan,
+		OS:           mgr.os,
+		ProjectID:    mgr.projectID,
+		BillingCycle: mgr.billing,
+		UserData:     ud,
+		Tags:         []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
 		HardwareReservationID: reservation,
 	}
 
@@ -269,8 +283,13 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	}
 	defer resp.Body.Close()
 
-	ioutil.ReadAll(resp.Body)
-	klog.Infof("Created new node on Packet.")
+	rbody, err := ioutil.ReadAll(resp.Body)
+	klog.V(3).Infof("Response body: %v", rbody)
+	if err != nil {
+		klog.Errorf("Failed to read response body: %v", err)
+	} else {
+		klog.Infof("Created new node on Packet.")
+	}
 	if cr.HardwareReservationID != "" {
 		klog.Infof("Reservation %v", cr.HardwareReservationID)
 	}
@@ -282,7 +301,8 @@ func createDevice(cr *DeviceCreateRequest) (*http.Response, error) {
 	packetAuthToken := os.Getenv("PACKET_AUTH_TOKEN")
 	url := "https://api.packet.net/projects/" + cr.ProjectID + "/devices"
 	jsonValue, _ := json.Marshal(cr)
-	klog.Infof("Creating new node")
+	klog.Infof("Creating new node yo")
+	klog.V(3).Infof("POST %s \n%v", url, jsonValue)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
 	if err != nil {
 		klog.Errorf("Failed to create device: %v", err)
@@ -317,8 +337,7 @@ func (mgr *packetManagerRest) deleteNodes(nodegroup string, nodes []NodeRef, upd
 			if Contains(d.Tags, "k8s-cluster-"+mgr.clusterName) && Contains(d.Tags, "k8s-nodepool-"+nodegroup) {
 				klog.Infof("nodegroup match %s %s", d.Hostname, n.Name)
 				if d.Hostname == n.Name {
-					klog.Infof("Hostname match!")
-					klog.Infof("Matching Packet Device %s - %s - %v", d.Hostname, d.ID)
+					klog.V(1).Infof("Matching Packet Device %s - %s - %v", d.Hostname, d.ID)
 					req, err := http.NewRequest("DELETE", "https://api.packet.net/devices/"+d.ID, bytes.NewBuffer([]byte("")))
 					req.Header.Set("X-Auth-Token", packetAuthToken)
 					req.Header.Set("Content-Type", "application/json")
