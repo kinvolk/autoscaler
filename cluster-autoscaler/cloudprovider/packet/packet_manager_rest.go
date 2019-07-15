@@ -301,7 +301,7 @@ func createDevice(cr *DeviceCreateRequest) (*http.Response, error) {
 	packetAuthToken := os.Getenv("PACKET_AUTH_TOKEN")
 	url := "https://api.packet.net/projects/" + cr.ProjectID + "/devices"
 	jsonValue, _ := json.Marshal(cr)
-	klog.Infof("Creating new node yo")
+	klog.Infof("Creating new node")
 	klog.V(3).Infof("POST %s \n%v", url, jsonValue)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
 	if err != nil {
