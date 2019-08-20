@@ -220,21 +220,13 @@ func randString8() string {
 	return string(b)
 }
 
-// createNodes provisions new nodes on packet and bootstraps them in the cluster.
-func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
-	klog.Infof("Updating node count to %d for nodegroup %s", nodes, nodegroup)
-	cloudinit, err := base64.StdEncoding.DecodeString(mgr.cloudinit)
-	if err != nil {
-		log.Fatal(err)
-		return fmt.Errorf("Could not decode cloudinit script: %v", err)
-	}
-
+func (mgr *packetManagerRest) createNode(cloudinit, nodegroup string) {
 	udvars := CloudInitTemplateData{
 		BootstrapTokenID:     os.Getenv("BOOTSTRAP_TOKEN_ID"),
 		BootstrapTokenSecret: os.Getenv("BOOTSTRAP_TOKEN_SECRET"),
 		APIServerEndpoint:    mgr.apiServerEndpoint,
 	}
-	ud := renderTemplate(string(cloudinit), udvars)
+	ud := renderTemplate(cloudinit, udvars)
 	hnvars := HostnameTemplateData{
 		ClusterName: mgr.clusterName,
 		NodeGroup:   nodegroup,
@@ -248,14 +240,14 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	}
 
 	cr := DeviceCreateRequest{
-		Hostname:     hn,
-		Facility:     []string{mgr.facility},
-		Plan:         mgr.plan,
-		OS:           mgr.os,
-		ProjectID:    mgr.projectID,
-		BillingCycle: mgr.billing,
-		UserData:     ud,
-		Tags:         []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
+		Hostname:              hn,
+		Facility:              []string{mgr.facility},
+		Plan:                  mgr.plan,
+		OS:                    mgr.os,
+		ProjectID:             mgr.projectID,
+		BillingCycle:          mgr.billing,
+		UserData:              ud,
+		Tags:                  []string{"k8s-cluster-" + mgr.clusterName, "k8s-nodepool-" + nodegroup},
 		HardwareReservationID: reservation,
 	}
 
@@ -292,6 +284,20 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	}
 	if cr.HardwareReservationID != "" {
 		klog.Infof("Reservation %v", cr.HardwareReservationID)
+	}
+}
+
+// createNodes provisions new nodes on packet and bootstraps them in the cluster.
+func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
+	klog.Infof("Updating node count to %d for nodegroup %s", nodes, nodegroup)
+	cloudinit, err := base64.StdEncoding.DecodeString(mgr.cloudinit)
+	if err != nil {
+		log.Fatal(err)
+		return fmt.Errorf("Could not decode cloudinit script: %v", err)
+	}
+
+	for i := 0; i < nodes; i++ {
+		mgr.createNode(string(cloudinit), nodegroup)
 	}
 
 	return nil
