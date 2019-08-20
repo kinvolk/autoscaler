@@ -284,7 +284,7 @@ func (mgr *packetManagerRest) createNodes(nodegroup string, nodes int) error {
 	defer resp.Body.Close()
 
 	rbody, err := ioutil.ReadAll(resp.Body)
-	klog.V(3).Infof("Response body: %v", rbody)
+	klog.V(3).Infof("Response body: %v", string(rbody))
 	if err != nil {
 		klog.Errorf("Failed to read response body: %v", err)
 	} else {
@@ -302,7 +302,7 @@ func createDevice(cr *DeviceCreateRequest) (*http.Response, error) {
 	url := "https://api.packet.net/projects/" + cr.ProjectID + "/devices"
 	jsonValue, _ := json.Marshal(cr)
 	klog.Infof("Creating new node")
-	klog.V(3).Infof("POST %s \n%v", url, jsonValue)
+	klog.V(3).Infof("POST %s \n%v", url, string(jsonValue))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonValue))
 	if err != nil {
 		klog.Errorf("Failed to create device: %v", err)
